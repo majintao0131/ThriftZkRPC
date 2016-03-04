@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<server>
+    <zookeeper>
+        <address>192.168.1.66:2181,192.168.1.67:2181,192.168.1.68:2181</address>
+        <timeout>3000</timeout>
+    </zookeeper>
+    <service>
+        <path>/rpc/test1</path>
+        <version>1.0.0</version>
+        <port>8080</port>
+        <weight>50</weight>
+    </service>
+</server>
