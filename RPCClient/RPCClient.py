@@ -6,8 +6,6 @@ __author__ = 'jintao'
 from ConnectionPool import ConnectionPool
 from ZkServiceProvider import ZkServiceProvider
 from Util.ConfigLoader import ConfigLoader
-from tornado import gen
-from Util.RPCExcept import NoClientError
 
 class RPCClient:
     def __init__(self, path):
@@ -59,6 +57,14 @@ class RPCClient:
                 return False
 
         return True
+
+    def service(self, service):
+        if not self.__connection_pool:
+            print 'Dont init the connection pool.'
+            return None
+
+        host_node = self.__connection_pool.get_host(service)
+        return host_node
 
     def get_client(self, serivce):
         if not self.__connection_pool:

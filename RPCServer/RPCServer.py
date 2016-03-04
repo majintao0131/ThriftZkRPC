@@ -7,7 +7,6 @@ import sys
 import signal
 from thrift import TTornado
 from thrift.protocol.TBinaryProtocol import TBinaryProtocolFactory
-from tornado.ioloop import IOLoop
 from ZkServiceRegister import ZkServiceRegister
 
 class RPCServer:

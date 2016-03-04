@@ -14,6 +14,16 @@ logging.basicConfig()
 @gen.coroutine
 def communicate(param):
     global rpc_client
+
+    result = yield rpc_client.service('EchoService1').echo(param)
+    if not result:
+        print 'get None.'
+
+    print result
+
+@gen.coroutine
+def communicate1(param):
+    global rpc_client
     conn = rpc_client.get_client('EchoService1').echo(param)
 
     if not conn:
@@ -24,6 +34,7 @@ def communicate(param):
     finish = clock()
     print 'use ' + str(finish - start) + ' us, result : ' + result
     rpc_client.put_client('EchoService1', conn)
+
 
 def client():
     global rpc_client
@@ -37,8 +48,6 @@ def client():
         communicate(param)
         io_loop.add_timeout(datetime.timedelta(seconds=0.1), doCommunicate, param)
     io_loop.add_callback(doCommunicate, "test1\n")
-    #io_loop.add_callback(doCommunicate, "test2")
-    #io_loop.add_callback(doCommunicate, "test3")
     io_loop.start()
 
 if __name__ == '__main__':

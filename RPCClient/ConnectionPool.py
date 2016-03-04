@@ -6,8 +6,10 @@ __author__ = 'jintao'
 from Queue import Queue
 
 from thrift.TTornado import TTornadoStreamTransport
+from thrift.TTornado import TTransportException
 from thrift.protocol.TBinaryProtocol import TBinaryProtocolFactory
 from tornado import gen
+import inspect
 
 DEFAULT_NETWORK_TIMEOUT = 0
 DEFAULT_POOL_SIZE = 20
@@ -42,9 +44,12 @@ class HostNode:
         self.__client_cls = client_cls
         self.__connection_queue = []
         self.__network_timeout = network_timeout
-        self.__permanet_size = 0
+        self.__permanent_size = 0
         self.__current_size = 0
         self.__status = HOST_STATUS_INVALID
+
+        for m in inspect.getmembers(self.__client_cls, predicate=inspect.ismethod):
+            setattr(self, m[0], self.__create_thrift_proxy__(m[0]))
 
     def _create_connection(self, type):
         transport = TTornadoStreamTransport(self.__host, self.__port)
@@ -69,7 +74,7 @@ class HostNode:
 
             self.__connection_queue.append(conn)
             self.__current_size += 1
-            self.__permanet_size += 1
+            self.__permanent_size += 1
             self.__status = HOST_STATUS_INIT
             if self.__current_size == self.__weight:
                 self.__status = HOST_STATUS_VALID
@@ -78,6 +83,33 @@ class HostNode:
                 break
 
         return True
+
+    def __create_thrift_proxy__(self, methodName):
+        def __thrift_proxy(*args):
+            return self.__thrift_call__(methodName, *args)
+        return __thrift_proxy
+
+    @gen.coroutine
+    def __thrift_call__(self, method, *args):
+        conn = self.get_connection()
+        if not conn:
+            raise gen.Return(None)
+
+        try:
+            result = yield getattr(conn.connection(), method)(*args)
+        except TTransportException as e:
+            print 'call func ' + method + ' failed. Error Message : ' + e.message()
+            conn.connection()._transport.close()
+            self.__current_size -= 1
+            if conn.type() == CONNECTION_TYPE_PERMANENT:
+                self.__permanent_size -= 1
+            raise gen.Return(None)
+        except Exception as e:
+            self.put_connection(conn)
+            raise gen.Return(None)
+
+        self.put_connection(conn)
+        raise gen.Return(result)
 
     def refresh(self, version):
         self.__version = version
@@ -99,8 +131,8 @@ class HostNode:
             except IndexError, e:
                 break
         self.__current_size = 0
-        self.__permanet_size = 0
-        print 'permanent size : ' + str(self.__permanet_size)
+        self.__permanent_size = 0
+        print 'permanent size : ' + str(self.__permanent_size)
         print 'current size : ' + str(self.__current_size)
 
     def get_connection(self):
@@ -120,8 +152,8 @@ class HostNode:
     def put_connection(self, conn):
         if self.__status == HOST_STATUS_INVALID:
             conn.connection()._transport.close()
-            if self.__permanet_size > 0:
-                self.__permanet_size -= 1
+            if self.__permanent_size > 0:
+                self.__permanent_size -= 1
             if self.__current_size > 0:
                 self.__current_size -= 1
             return
@@ -173,7 +205,7 @@ class ServiceNode:
                 print "host version : " + str(host_node.version()) + "; service version : " + str(self.__version)
                 self.__host_pool[host].close_all()
                 del self.__host_pool[host]
-                print 'clear host : ' + str(self.__host_pool[host])
+                print 'clear host : ' + host
 
     '''
         method : add_host
@@ -208,6 +240,19 @@ class ServiceNode:
             node.close()
             del self.__host_pool[host]
 
+    def get_host(self):
+        count = len(self.__host_pool)
+        passed = 0
+        while passed < count:
+            try:
+                (host, host_node) = self.__host_pool.popitem()
+                passed += 1
+                self.__host_pool[host] = host_node
+                if host_node.status() == HOST_STATUS_VALID or host_node.status() == HOST_STATUS_INIT:
+                    return host_node
+            except KeyError:
+                return None
+
     def get_client(self):
         count = len(self.__host_pool)
         passed = 0
@@ -230,7 +275,6 @@ class ServiceNode:
         host_node = self.__host_pool[conn.host()]
         host_node.put_connection(conn)
         return True
-
 
 class ConnectionPool:
     def __init__(self):
@@ -259,6 +303,13 @@ class ConnectionPool:
         service_node = self.__service_pool[service]
         del self.__service_pool[service]
         service_node.clear_hosts()
+
+    def get_host(self, service_name):
+        if service_name not in self.__service_pool:
+            return None
+
+        service_node = self.__service_pool[service_name]
+        return service_node.get_host()
 
     def get_client(self, service_name):
         if service_name not in self.__service_pool:
